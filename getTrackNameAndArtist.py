@@ -1,22 +1,32 @@
 import sys
 import spotipy
 import spotipy.util as util
+import unicodedata
+#import traceback
 
-scope = 'user-library-read user-modify-playback-state'
+class getTrackNameAndArtist:
+    global scope
+    scope = 'user-library-read user-modify-playback-state'
 
-if len(sys.argv) > 2:
-    username = sys.argv[1]
-    track_id = sys.argv[2]
-else:
-    print "Usage: %s username track_id" % (sys.argv[0],)
-    sys.exit()
+    def __init__(self, username):
+        self.username = username
+        self.token = None
+        self.sp = spotipy.Spotify(auth=self.token)
 
-token = util.prompt_for_user_token(username, scope)
+    def renewToken(self):
+        self.token = util.prompt_for_user_token(self.username, scope)
+        self.sp = spotipy.Spotify(auth=self.token)
 
-if token:
-    sp = spotipy.Spotify(auth=token)
-    
-    results = sp.track(track_id)
-    print results['name'] + '-' + results['artists'][0]['name']
-else:
-    print "Can't get token for", username
+    def escapeUnicode(self, text):
+        return unicodedata.normalize('NFKD', unicode(text)).encode('ascii', 'ignore')
+
+    def getSongName(self, track_id):
+        try:
+            results = self.sp.track(track_id)
+            name = self.escapeUnicode(results['name'])
+            artist = self.escapeUnicode(results['artists'][0]['name'])
+            return name + " - " + artist        
+        except:
+            #traceback.print_exc()
+            self.renewToken()
+            return self.getSongName(track_id)

@@ -1,49 +1,81 @@
 import RPi.GPIO as GPIO
-import time
-import subprocess
 import I2C_LCD_driver
+from subprocess import Popen, PIPE
+from nbstreamreader import NonBlockingStreamReader as NBSR
 GPIO.setmode(GPIO.BCM)  
-  
-# GPIO 23 & 17 set up as inputs, pulled up to avoid false detection.  
-# Both ports are wired to connect to GND on button press.  
-# So we'll be setting up falling edge detection for both  
+import time
+from threading import Thread
+import unicodedata
+from getTrackNameAndArtist import getTrackNameAndArtist
+
 GPIO.setup(23, GPIO.IN, pull_up_down=GPIO.PUD_UP)  
 GPIO.setup(24, GPIO.IN, pull_up_down=GPIO.PUD_UP)  
 GPIO.setup(25, GPIO.IN, pull_up_down=GPIO.PUD_UP)  
-  
-# GPIO 24 set up as an input, pulled down, connected to 3V3 on button press  
-#GPIO.setup(24, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)  
-  
-# now we'll define two threaded callback functions  
-# these will run in another thread when our events are detected  
+
+p = Popen("./play-pause", shell=False, stdout=PIPE, stdin=PIPE)
+nbsr = NBSR(p.stdout)
+
 def my_callback(channel):  
     print "falling edge detected on 23"
-    process = subprocess.Popen("~/lcdtest/play-pause --command pause", shell=True, stdout=subprocess.PIPE)
-    process.wait()
-    print process.returncode
+    p.stdin.write("pause\n")
 def my_callback2(channel):  
     print "falling edge detected on 24"
-    process = subprocess.Popen("~/lcdtest/play-pause --command play", shell=True, stdout=subprocess.PIPE)
-    process.wait()
-    print process.returncode
+    p.stdin.write("play\n")
 def my_callback3(channel):  
     print "falling edge detected on 25"
-    process = subprocess.Popen("~/lcdtest/play-pause --command next", shell=True, stdout=subprocess.PIPE)
-    process.wait()
-    print process.returncode
+    p.stdin.write("next\n")
 
-#raw_input("Press Enter when ready\n>")  
-  
 GPIO.add_event_detect(23, GPIO.FALLING, callback=my_callback, bouncetime=1000)  
 GPIO.add_event_detect(24, GPIO.FALLING, callback=my_callback2, bouncetime=1000)  
 GPIO.add_event_detect(25, GPIO.FALLING, callback=my_callback3, bouncetime=1000)  
 
-try:
-#    while(True):
-#        time.sleep(1) 
+printDate = True
+trackId = None
+global trackName
+global killSwitch
+killSwitch = False
+
+global t
+t = getTrackNameAndArtist('USERNAME')
+
+def trackNameGetThread():
+    global trackName
+    print "threadLaunch: " + trackId[:-1]
+    a = t.getSongName(trackId[:-1])
+    trackName = unicodedata.normalize('NFKD', unicode(a)).encode('ascii','ignore')
+    print trackName
+
+def screenThread():
     mylcd = I2C_LCD_driver.lcd()
+    while not killSwitch:
+        try:
+            if printDate:
+                mylcd.lcd_display_string("Date: %s" %time.strftime("%d/%m/%Y"), 1)
+            else:
+                mylcd.lcd_display_string(trackName[0:16], 1)
+            mylcd.lcd_display_string("Time: %s" %time.strftime("%H:%M:%S"), 2)
+            time.sleep(0.5)
+        except:
+            thread.exit()
+try:
+    screenThread = Thread(target = screenThread)
+    screenThread.start()
     while True:
-        mylcd.lcd_display_string("Time: %s" %time.strftime("%H:%M:%S"), 1)
-        mylcd.lcd_display_string("Date: %s" %time.strftime("%d/%m/%Y"), 2)  
-except KeyboardInterrupt:  
-    GPIO.cleanup()       # clean up GPIO on normal exit  
+        rawOutput = nbsr.readline(1)
+        if rawOutput:
+            #print rawOutput
+            response = rawOutput.split('|')
+            if len(response) == 7:
+                if response[2] == "kPlayStatusPlay" and response[6] != "dupa\n":
+                    if trackId != response[6]:
+                        trackId = response[6]
+                        trackName = "   Loading...   "
+                        thread = Thread(target = trackNameGetThread)
+                        thread.start()
+                    printDate = False
+                else:
+                    printDate = True
+except:
+    killSwitch = True
+    p.kill()
+    GPIO.cleanup()
