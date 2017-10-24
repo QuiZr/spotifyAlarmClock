@@ -24,6 +24,7 @@ class NonBlockingStreamReader:
                     queue.put(line)
                 else:
                     self.has_broken = True
+                    break
 
         self._t = Thread(target = _populateQueue,
                 args = (self._s, self._q))
